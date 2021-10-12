@@ -14,7 +14,6 @@ library(tidycensus)
 library(ggthemes)
 library(ggspatial)
 library(htmlwidgets)
-library(tidytransit)
 
 # PFAS data
 CWS <- read.csv("CWS_data for VIS.csv")
@@ -103,9 +102,9 @@ ggplot(NJ_demo) +
 NJ_Hisp_palette <- colorNumeric(palette = "inferno", NJ_demo$percHisp)
 
 percHisp_map1 <- leaflet(NJ_demo) %>%
-  addProviderTiles("Stamen.Terrain") %>%
+  addProviderTiles(providers$Stamen.Terrain, group = "Stamen.Terrain") %>%
   addPolygons(color = ~NJ_Hisp_palette(percHisp), stroke = FALSE, 
-              fillOpacity = 0.7,
+              fillOpacity = 0.7, group = "% Hispanic",
               highlightOptions = highlightOptions(fillColor = "darkorange", 
                                                   fillOpacity = 0.9),
               label = NJ_demo$NAME,
@@ -121,7 +120,12 @@ percHisp_map1 <- leaflet(NJ_demo) %>%
     title = "Percent of population<br/>identifying as Hispanic",
     labFormat = labelFormat(suffix = "%",
                             transform = function(x) 100 * x),
-    opacity = 1)
+    opacity = 1) %>%
+  addLayersControl(
+    overlayGroups = c("% Hispanic"),
+    options = layersControlOptions(collapsed = FALSE)
+    
+  )
 
 percHisp_map1
 
@@ -129,12 +133,12 @@ percHisp_map1
 ```
 
 ```{r}
-NJ_PFAS_palette <- colorNumeric(palette = "magma", NJ_demo$sum.6PFAS)
+NJ_PFAS_palette <- colorNumeric(palette = "inferno", NJ_demo$sum.6PFAS)
 
 PFAS_map1 <- leaflet(NJ_demo) %>%
   addProviderTiles("Stamen.Terrain") %>%
   addPolygons(color = ~NJ_PFAS_palette(sum.6PFAS), stroke = FALSE, 
-              fillOpacity = 0.7,
+              fillOpacity = 0.7, group = "Avg sum of 6 PFAS",
               highlightOptions = highlightOptions(fillColor = "darkorange", 
                                                   fillOpacity = 0.9),
               label = NJ_demo$NAME,
@@ -146,10 +150,37 @@ PFAS_map1 <- leaflet(NJ_demo) %>%
                             "Average sum of 6 PFAS: ", 
                             round(NJ_demo$sum.6PFAS, 2), 
                             sep = "")) %>%
-    addLegend("bottomright", pal = NJ_PFAS_palette, values = ~sum.6PFAS,
+    addLegend("bottomleft", pal = NJ_PFAS_palette, values = ~sum.6PFAS,
     title = "Average sum of 6 PFAS<br/>from community water systems",
     labFormat = labelFormat(suffix = " ppt"),
-    opacity = 1)
+    opacity = 1) %>%
+  addLayersControl(
+    overlayGroups = c("% Hispanic"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>% 
+   addPolygons(color = ~NJ_Hisp_palette(percHisp), stroke = FALSE, 
+              fillOpacity = 0.7, group = "% Hispanic",
+              highlightOptions = highlightOptions(fillColor = "darkorange", 
+                                                  fillOpacity = 0.9),
+              label = NJ_demo$NAME,
+              popup = paste("Total population: ", NJ_demo$tot_pop, "<br/>",
+                            "Hispanic population: ", NJ_demo$hispanic_pop, " (", 
+                            round(NJ_demo$percHisp * 100, 1), "%)", "<br/>",
+                            "Black population: ", NJ_demo$black_pop, " (", 
+                            round(NJ_demo$percBlack * 100, 1), "%)", "<br/>",
+                            "Average sum of 6 PFAS: ", 
+                            round(NJ_demo$sum.6PFAS, 2), 
+                            sep = "")) %>%
+  addLegend("bottomleft", pal = NJ_Hisp_palette, values = ~percHisp,
+    title = "Percent of population<br/>identifying as Hispanic",
+    labFormat = labelFormat(suffix = "%",
+                            transform = function(x) 100 * x),
+    opacity = 1) %>%
+  addLayersControl(
+    baseGroups = c("% Hispanic", "Avg sum of 6 PFAS"),
+    options = layersControlOptions(collapsed = FALSE)
+    
+  )
 
 PFAS_map1
 
