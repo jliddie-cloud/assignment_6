@@ -1,0 +1,212 @@
+---
+title: "Assignment 6"
+author: "Jahred Liddie"
+date: "10/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# load data and set up libraries
+library(leaflet)
+library(sf)
+library(tidyverse)
+library(tidycensus)
+library(ggthemes)
+library(ggspatial)
+library(htmlwidgets)
+library(tidytransit)
+
+# PFAS data
+CWS <- read.csv("CWS_data for VIS.csv")
+suspected <- st_read("suspected_sites_2020MARCH23.geojson")
+military <- st_read("Military_2020MARCH04.geojson")
+
+# NJ boundary
+NJ_counties <- st_read("County_Boundaries_of_NJ/County_Boundaries_of_NJ.shp")
+  
+NJ.serviceareas <- st_read("C:/Users/jahre/Dropbox/HSPH - 2019-2021/Thesis/New Jersey/Purveyor_Service_Areas_of_New_Jersey/Purveyor_Service_Areas_of_New_Jersey.shp")  
+
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Get list of variables
+```{r, message=FALSE, warning = FALSE, results='hide'}
+vars2017 <- load_variables(2017, "acs5")
+
+NJ_demo <- get_acs(geography = "county",
+                         state = "NJ", year = 2010, 
+                         output = "wide",
+                         variables = c(tot_pop = "B02001_001E",
+                                       black_pop = "B02001_003E",
+                                       hispanic_pop = "B03001_003E",
+                                       white_pop = "B02001_002E",
+                                       tot_households = "B07013_001E",
+                                       homeowner = "B07013_002E",
+                                       renter = "B07013_003E"),
+                   geometry = TRUE) %>%
+  select(GEOID, tot_pop, black_pop, hispanic_pop, white_pop, tot_households,
+         NAME, homeowner, renter) # keeping only estimates, not MoEs
+
+# create percents
+NJ_demo <- NJ_demo %>%
+  mutate(percHisp = hispanic_pop/tot_pop,
+         percBlack = black_pop/tot_pop,
+         percWhite = white_pop/tot_pop,
+         perchomeowner = homeowner/tot_households,
+         percrenter = renter/tot_households,
+         county = substr(NAME, 0, str_length(NAME)-19), # extract just name
+         state_county = paste("nj", tolower(county), sep="_")
+         )
+
+# merge water data with ACS
+  # first collapse dataset to counties in NJ
+  CWS.NJ.counties <- CWS %>% filter(State == "NJ") %>%
+    group_by(state_county) %>%
+    summarise(PFOA.avg = as.numeric(mean(PFOA, na.rm = T)),
+              PFOS.avg = as.numeric(mean(PFOS, na.rm = T)),
+              PFNA.avg = mean(PFNA, na.rm = T),
+              PFHpA.avg = mean(PFHpA, na.rm = T),
+              PFBS.avg = mean(PFBS, na.rm = T),
+              PFHxS.avg = mean(PFHxS, na.rm = T)) %>%
+    ungroup()
+  
+  
+  CWS.NJ.counties$sum.6PFAS <- base::rowSums(CWS.NJ.counties[,2:7], 
+                                             na.rm = TRUE)
+
+NJ_demo <- left_join(NJ_demo, CWS.NJ.counties)
+
+# now map
+NJ_state_plane <- "+proj=tmerc +lat_0=38.83333333333334 +lon_0=-74.5 +k=0.9999 +x_0=150000 +y_0=0 +ellps=GRS80 +datum=NAD83 +to_meter=0.3048006096012192 +no_defs"
+
+ggplot(NJ_demo) +
+  annotation_map_tile(zoomin = 0, progress = "none", type = "stamenbw") +
+  geom_sf(color = NA, aes(fill = percHisp), alpha = 0.7) +
+  coord_sf(crs = NJ_state_plane) +
+  scale_fill_viridis_c(name = "Percent of population\nidentifying as Hispanic",
+                        labels = c("0%", "10%", "20%", "30%", "40%")) +
+  theme_void()
+
+ggplot(NJ_demo) +
+  annotation_map_tile(zoomin = 0, progress = "none", type = "stamenbw") +
+  geom_sf(color = NA, aes(fill = sum.6PFAS), alpha = 0.7) +
+  coord_sf(crs = NJ_state_plane) +
+  scale_fill_viridis_c(name = "Average total of 6 PFAS\nfrom water systems\n[ppt]") +
+  theme_void()
+
+```
+
+# Interactive map 1
+```{r}
+NJ_Hisp_palette <- colorNumeric(palette = "inferno", NJ_demo$percHisp)
+
+percHisp_map1 <- leaflet(NJ_demo) %>%
+  addProviderTiles("Stamen.Terrain") %>%
+  addPolygons(color = ~NJ_Hisp_palette(percHisp), stroke = FALSE, 
+              fillOpacity = 0.7,
+              highlightOptions = highlightOptions(fillColor = "darkorange", 
+                                                  fillOpacity = 0.9),
+              label = NJ_demo$NAME,
+              popup = paste("Total population: ", NJ_demo$tot_pop, "<br/>",
+                            "Hispanic population: ", NJ_demo$hispanic_pop, " (", 
+                            round(NJ_demo$percHisp * 100, 1), "%)", "<br/>",
+                            "Black population: ", NJ_demo$black_pop, " (", 
+                            round(NJ_demo$percBlack * 100, 1), "%)", "<br/>",
+                            "Average sum of 6 PFAS: ", 
+                            round(NJ_demo$sum.6PFAS, 2), 
+                            sep = "")) %>%
+    addLegend("bottomright", pal = NJ_Hisp_palette, values = ~percHisp,
+    title = "Percent of population<br/>identifying as Hispanic",
+    labFormat = labelFormat(suffix = "%",
+                            transform = function(x) 100 * x),
+    opacity = 1)
+
+percHisp_map1
+
+
+```
+
+```{r}
+NJ_PFAS_palette <- colorNumeric(palette = "magma", NJ_demo$sum.6PFAS)
+
+PFAS_map1 <- leaflet(NJ_demo) %>%
+  addProviderTiles("Stamen.Terrain") %>%
+  addPolygons(color = ~NJ_PFAS_palette(sum.6PFAS), stroke = FALSE, 
+              fillOpacity = 0.7,
+              highlightOptions = highlightOptions(fillColor = "darkorange", 
+                                                  fillOpacity = 0.9),
+              label = NJ_demo$NAME,
+              popup = paste("Total population: ", NJ_demo$tot_pop, "<br/>",
+                            "Hispanic population: ", NJ_demo$hispanic_pop, " (", 
+                            round(NJ_demo$percHisp * 100, 1), "%)", "<br/>",
+                            "Black population: ", NJ_demo$black_pop, " (", 
+                            round(NJ_demo$percBlack * 100, 1), "%)", "<br/>",
+                            "Average sum of 6 PFAS: ", 
+                            round(NJ_demo$sum.6PFAS, 2), 
+                            sep = "")) %>%
+    addLegend("bottomright", pal = NJ_PFAS_palette, values = ~sum.6PFAS,
+    title = "Average sum of 6 PFAS<br/>from community water systems",
+    labFormat = labelFormat(suffix = " ppt"),
+    opacity = 1)
+
+PFAS_map1
+
+```
+
+
+Work with military installations and suspected source data
+```{r}
+suspected <- st_transform(suspected, crs = NJ_state_plane)
+military <- st_transform(military, crs = NJ_state_plane)
+
+military.NJ <- military[NJ_counties,]
+suspected.NJ <- suspected[NJ_counties,]
+
+NJ_counties <- st_transform(NJ_counties, crs = NJ_state_plane)
+
+```
+
+# Map with demographic data
+```{r}
+PFASsource_map <- percHisp_map1 %>%
+  addMarkers(lng = suspected.NJ$Longitude,
+             lat = suspected.NJ$Latitude, 
+             icon = list(
+                    iconUrl = 'suspected.png',
+                    iconSize = c(20, 20)
+                   ),
+             popup = paste(suspected.NJ$FACIL_NAME, 
+                           suspected.NJ$BRANCH, sep = ": ")) %>%
+   addMarkers(lng = military.NJ$Longitude,
+              lat = military.NJ$Latitude,
+              icon = list(
+                     iconUrl = 'military.jfif',
+                     iconSize = c(20, 20)),
+              popup = paste("ID", military.NJ$EWG_ID, sep = ": "))
+
+PFASsource_map
+```
+
+# Map with PFAS data
+```{r}
+PFASsource_map2 <- PFAS_map1 %>%
+  addMarkers(lng = suspected.NJ$Longitude,
+             lat = suspected.NJ$Latitude, 
+             icon = list(
+                    iconUrl = 'suspected.png',
+                    iconSize = c(20, 20)
+                   ),
+             popup = paste(suspected.NJ$FACIL_NAME, 
+                           suspected.NJ$BRANCH, sep = ": ")) %>%
+   addMarkers(lng = military.NJ$Longitude,
+              lat = military.NJ$Latitude,
+              icon = list(
+                     iconUrl = 'military.jfif',
+                     iconSize = c(20, 20)),
+              popup = paste("ID", military.NJ$EWG_ID, sep = ": "))
+
+PFASsource_map2
+```
+
